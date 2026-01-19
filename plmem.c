@@ -127,6 +127,8 @@ static int plmem_probe(struct platform_device *pdev)
 
 	/* Request I/O resource */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return dev_err_probe(&pdev->dev, -ENODEV, "No MEM resource\n");
 
 	data->mem_start = res->start;
 	data->mem_size = res->end - res->start + 1;
