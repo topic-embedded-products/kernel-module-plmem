@@ -1,0 +1,80 @@
+# plmem - TOPIC userspace IO driver
+
+## Introduction
+
+Started out as an experiment to see what effect write-combining would have on a
+PS-to-PL interface. Target was to be able to use memtester on the CPU side with
+reasonable performance.
+
+The Linux UIO driver has a similar function but doesn't allow one to set the
+writecombine flag. It's also rather cumbersome to use, as modifying the cmdline
+is mandatarory to get it to probe at all.
+
+## Devicetree binding
+
+Example bindings:
+
+	pl_bram@b0000000 {
+		compatible = "topic,plmem";
+		reg = <0x0 0xb0000000 0x0 0x40000>; /* 256kB */
+		label = "bram";
+		topic,mem-type = "writecombine";
+	};
+	regmap@a0000000 {
+		compatible = "topic,regmap";
+		reg = <0x0 0xa0000000 0x0 0x1000>;
+		label = "iotgty";
+	};
+
+  compatible:
+    enum:
+      - topic,plmem
+      - topic,regmap
+
+  reg:
+    maxItems: 1
+
+  label:
+    description: Unique name, the device name in /dev
+
+  topic,mem-type:
+    enum:
+      - noncached
+      - writecombine
+      - cached
+
+## Usage
+
+Open the /dev/label file and mmap it. Note that the device does not support
+read, write, poll or seek operations. Use the memory mapping to read and write
+to the address space of the device.
+
+For "memory" devices, memtester can be used directly, for example:
+  `memtester -p 0 -d /dev/bram 64k`
+
+For IOTester devices, provide /dev/label as the device name (instead of /dev/mem)
+to the IOTester class in the test framework.
+
+## Memory types
+
+The driver will mmap the memory using the flags specified by "mem-type". The
+default is "noncached" for regmap and "writecombine" for plmem.
+
+When set to "noncached", each and every CPU access, no matter how small, will
+result in an AXI transaction on the PL side. Writing a 32-bit value on a 128-bus
+will use the WSTRB bits and provide only 32 valid data bits.
+
+When set to "writecombine", the CPU is allowed to coalesce and reorder writes.
+The result is that writing 8 sequential 64-bit values to a 128-bit bus
+will usually result in a single burst transaction of 4 128-bit words on the AXI
+bus. Read transactions will behave as "noncached", and will also result in
+flushing any outstanding write requests.
+This type is typically used for write-only devices (e.g. overlay image,
+reference data) without "side effects".
+
+When set to "cached", the memory is assumed to behave as RAM. If the region is
+smaller than the CPU cache, there's a fair chance that you'll see no actual
+AXI traffic at all. Only use if the device really behaves as RAM (DDR or BRAM
+controller). Typical usage would be to somewhat stress a DDR controller using
+the CPU, or to optimize sequential read access on a large memory region.
+
